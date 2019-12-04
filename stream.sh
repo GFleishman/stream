@@ -57,9 +57,10 @@ channel=${1?}; shift
 aff_scale=${1?}; shift
 def_scale=${1?}; shift
 xy_stride=${1?}; shift
-xy_overlap=${1?}; shift
 z_stride=${1?}; shift
-z_overlap=${1?}; shift
+
+xy_overlap=$(( $xy_stride / 8 ))
+z_overlap=$(( $z_stride / 8 ))
 
 
 # TODO: add prefix based on fixed/moving paths to job names to avoid
@@ -68,7 +69,7 @@ z_overlap=${1?}; shift
 initialize_environment
 
 submit "cut_tiles" '' 1 \
-$CUT_TILES $fixed /${channel}/${def_scale} $tiledir ${xy_stride} ${xy_overlap} ${z_stride} ${z_overlap}
+$CUT_TILES $fixed /${channel}/${def_scale} $tiledir $xy_stride $xy_overlap $z_stride $z_overlap
 
 submit "coarse_spots" '' 1 \
 $SPOTS $fixed /${channel}/${aff_scale} ${affdir}/fixed_spots.pkl coarse
@@ -116,30 +117,12 @@ for tile in $( ls -d ${tiledir}/*[0-9] ); do
 done
 
 for tile in $( ls -d ${tiledir}/*[0-9] ); do
-  submit "stitch_north" 'deform*' 1 \
-  $STITCH $tile ${overlap} $fixed /${channel}/${def_scale} ${affdir}/ransac_affine.mat \
-          ${outdir}/transform ${outdir}/invtransform /${def_scale} N
+  submit "stitch" 'deform*' 1 \
+  $STITCH $tile $xy_overlap $fixed /${channel}/${def_scale} ${affdir}/ransac_affine.mat \
+          ${outdir}/transform ${outdir}/invtransform /${def_scale}
 done
 
-for tile in $( ls -d ${tiledir}/*[0-9] ); do
-  submit "stitch_south" "stitch_north" 1 \
-  $STITCH $tile ${overlap} $fixed /${channel}/${def_scale} ${affdir}/ransac_affine.mat \
-          ${outdir}/transform ${outdir}/invtransform /${def_scale} S
-done
-
-for tile in $( ls -d ${tiledir}/*[0-9] ); do
-  submit "stitch_east" "stitch_south" 1 \
-  $STITCH $tile ${overlap} $fixed /${channel}/${def_scale} ${affdir}/ransac_affine.mat \
-          ${outdir}/transform ${outdir}/invtransform /${def_scale} E
-done
-
-for tile in $( ls -d ${tiledir}/*[0-9] ); do
-  submit "stitch_west" "stitch_east" 1 \
-  $STITCH $tile ${overlap} $fixed /${channel}/${def_scale} ${affdir}/ransac_affine.mat \
-          ${outdir}/transform ${outdir}/invtransform /${def_scale} W
-done
-
-submit "apply_transform" "stitch_west" 6 \
+submit "apply_transform" "stitch" 6 \
 $APPLY_TRANSFORM $fixed /${channel}/${def_scale} $moving /${channel}/${def_scale} \
                  ${outdir}/transform ${outdir}/warped
 

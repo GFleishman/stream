@@ -114,12 +114,12 @@ def read_matrix(matrix_path):
     return np.float32(matrix)
 
 
-def create_n5_dataset(n5_path, subpath, sh):
+def create_n5_dataset(n5_path, subpath, sh, overlap):
     n5im = z5py.File(n5_path, use_zarr_format=False)
     try:
-        n5im.create_dataset('/c0'+subpath, shape=sh[::-1], chunks=(70, 128, 128), dtype=np.float32)
-        n5im.create_dataset('/c1'+subpath, shape=sh[::-1], chunks=(70, 128, 128), dtype=np.float32)
-        n5im.create_dataset('/c2'+subpath, shape=sh[::-1], chunks=(70, 128, 128), dtype=np.float32)
+        n5im.create_dataset('/c0'+subpath, shape=sh[::-1], chunks=(70, overlap, overlap), dtype=np.float32)
+        n5im.create_dataset('/c1'+subpath, shape=sh[::-1], chunks=(70, overlap, overlap), dtype=np.float32)
+        n5im.create_dataset('/c2'+subpath, shape=sh[::-1], chunks=(70, overlap, overlap), dtype=np.float32)
     except:
         pass
     return n5im
@@ -156,69 +156,57 @@ if __name__ == '__main__':
     group_id        = sys.argv[9]
 
 
-    part_of_group = False
-    offset, extent, index = read_coords(tile + '/coords.txt')
-    if group_id == 'N':
-        if index[0] % 2 == 0 and index[1] % 2 == 0: part_of_group = True
-    if group_id == 'S':
-        if index[0] % 2 == 0 and index[1] % 2 == 1: part_of_group = True
-    if group_id == 'E':
-        if index[0] % 2 == 1 and index[1] % 2 == 0: part_of_group = True
-    if group_id == 'W': 
-        if index[0] % 2 == 1 and index[1] % 2 == 1: part_of_group = True
+    tiledir = dirname(tile)
+    vox = read_n5_spacing(reference, ref_subpath)
 
-    if part_of_group:
-        tiledir = dirname(tile)
-        vox = read_n5_spacing(reference, ref_subpath)
-    
-        matrix = read_matrix(global_affine)
-        grid = np.round(extent/vox).astype(np.uint16)
-        grid = position_grid(grid) * vox + offset
-        updated_warp = transform_grid(matrix, grid)
+    matrix = read_matrix(global_affine)
+    grid = np.round(extent/vox).astype(np.uint16)
+    grid = position_grid(grid) * vox + offset
+    updated_warp = transform_grid(matrix, grid)
 
-        # TODO: should actually be using grid based on moving image coordinates here
-        inv_matrix = np.array([ matrix[0],
-                                matrix[1],
-                                matrix[2],
-                                [0, 0, 0, 1] ])
-        inv_matrix = np.linalg.inv(inv_matrix)[:-1]
-        updated_invwarp = transform_grid(inv_matrix, grid)
-        del grid; gc.collect()
-    
-        neighbors = get_neighbors(tiledir, offset, extent)
-        if isfile(neighbors['center']+'/final_lcc.nrrd'):
-            lcc = read_fields(neighbors, suffix='/final_lcc.nrrd')
-            for key in lcc.keys():
-                lcc[key][lcc[key] > 1.0] = 0  # typically in noisy regions
-            warps = read_fields(neighbors, suffix='/warp.nrrd')
-            updated_warp += reconcile_warps(lcc, warps, overlap)
-            del warps; gc.collect()  # need space for inv_warps
-            inv_warps = read_fields(neighbors, suffix='/invwarp.nrrd')
-            updated_invwarp += reconcile_warps(lcc, inv_warps, overlap)
-            
-    
-        # OPTIONAL: SMOOTH THE OVERLAP REGIONS
-        # OPTIONAL: USE WEIGHTED COMBINATION BASED ON LCC AT ALL VOXELS
-    
-        oo = np.round(offset/vox).astype(np.uint16)
-        if not neighbors['pos']: 
-            updated_warp = updated_warp[overlap:, overlap:]
-            updated_invwarp = updated_invwarp[overlap:, overlap:]
-            oo[0:2] += overlap
-        elif neighbors['pos'] == 'left':
-            updated_warp = updated_warp[:, overlap:]
-            updated_invwarp = updated_invwarp[:, overlap:]
-            oo[1] += overlap
-        elif neighbors['pos'] == 'top':
-            updated_warp = updated_warp[overlap:, :]
-            updated_invwarp = updated_invwarp[overlap:, :]
-            oo[0] += overlap
-    
-    
-        # the shape here should be the complete s2 image dimensions
-        ref_grid = read_reference_grid(reference, ref_subpath)
-        n5im = create_n5_dataset(output, output_subpath, ref_grid)
-        write_updated_transform(n5im, output_subpath, updated_warp, oo)
-        n5im = create_n5_dataset(invoutput, output_subpath, ref_grid)
-        write_updated_transform(n5im, output_subpath, updated_invwarp, oo)
+    # TODO: should actually be using grid based on moving image coordinates here
+    inv_matrix = np.array([ matrix[0],
+                            matrix[1],
+                            matrix[2],
+                            [0, 0, 0, 1] ])
+    inv_matrix = np.linalg.inv(inv_matrix)[:-1]
+    updated_invwarp = transform_grid(inv_matrix, grid)
+    del grid; gc.collect()
+
+    neighbors = get_neighbors(tiledir, offset, extent)
+    if isfile(neighbors['center']+'/final_lcc.nrrd'):
+        lcc = read_fields(neighbors, suffix='/final_lcc.nrrd')
+        for key in lcc.keys():
+            lcc[key][lcc[key] > 1.0] = 0  # typically in noisy regions
+        warps = read_fields(neighbors, suffix='/warp.nrrd')
+        updated_warp += reconcile_warps(lcc, warps, overlap)
+        del warps; gc.collect()  # need space for inv_warps
+        inv_warps = read_fields(neighbors, suffix='/invwarp.nrrd')
+        updated_invwarp += reconcile_warps(lcc, inv_warps, overlap)
+        
+
+    # OPTIONAL: SMOOTH THE OVERLAP REGIONS
+    # OPTIONAL: USE WEIGHTED COMBINATION BASED ON LCC AT ALL VOXELS
+
+    oo = np.round(offset/vox).astype(np.uint16)
+    if not neighbors['pos']: 
+        updated_warp = updated_warp[overlap:, overlap:]
+        updated_invwarp = updated_invwarp[overlap:, overlap:]
+        oo[0:2] += overlap
+    elif neighbors['pos'] == 'left':
+        updated_warp = updated_warp[:, overlap:]
+        updated_invwarp = updated_invwarp[:, overlap:]
+        oo[1] += overlap
+    elif neighbors['pos'] == 'top':
+        updated_warp = updated_warp[overlap:, :]
+        updated_invwarp = updated_invwarp[overlap:, :]
+        oo[0] += overlap
+
+
+    # the shape here should be the complete s2 image dimensions
+    ref_grid = read_reference_grid(reference, ref_subpath)
+    n5im = create_n5_dataset(output, output_subpath, ref_grid, overlap)
+    write_updated_transform(n5im, output_subpath, updated_warp, oo)
+    n5im = create_n5_dataset(invoutput, output_subpath, ref_grid, overlap)
+    write_updated_transform(n5im, output_subpath, updated_invwarp, oo)
 
