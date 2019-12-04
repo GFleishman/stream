@@ -56,8 +56,11 @@ outdir=${1?}; shift
 channel=${1?}; shift
 aff_scale=${1?}; shift
 def_scale=${1?}; shift
-stride=${1?}; shift
-overlap=${1?}; shift
+xy_stride=${1?}; shift
+xy_overlap=${1?}; shift
+z_stride=${1?}; shift
+z_overlap=${1?}; shift
+
 
 # TODO: add prefix based on fixed/moving paths to job names to avoid
 #       dependency conflict between simultaneous runs
@@ -65,7 +68,7 @@ overlap=${1?}; shift
 initialize_environment
 
 submit "cut_tiles" '' 1 \
-$CUT_TILES $fixed /${channel}/${def_scale} $tiledir ${stride} ${overlap}
+$CUT_TILES $fixed /${channel}/${def_scale} $tiledir ${xy_stride} ${xy_overlap} ${z_stride} ${z_overlap}
 
 submit "coarse_spots" '' 1 \
 $SPOTS $fixed /${channel}/${aff_scale} ${affdir}/fixed_spots.pkl coarse
