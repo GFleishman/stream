@@ -118,7 +118,7 @@ done
 
 for tile in $( ls -d ${tiledir}/*[0-9] ); do
   submit "stitch" 'deform*' 1 \
-  $STITCH $tile $xy_overlap $fixed /${channel}/${def_scale} ${affdir}/ransac_affine.mat \
+  $STITCH $tile $xy_overlap $z_overlap $fixed /${channel}/${def_scale} ${affdir}/ransac_affine.mat \
           ${outdir}/transform ${outdir}/invtransform /${def_scale}
 done
 
