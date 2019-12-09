@@ -20,6 +20,12 @@ xy_stride=512
 # the number of voxels along z for registration tiling, must be power of 2
 z_stride=512
 
+# computational parameters
+little_gaussian_stddev="later"
+big_gaussian_stddev="later"
+cc_radius="later"
+def_smoothing="later"
+
 
 # DO NOT EDIT BELOW THIS LINE
 big_stream='/groups/multifish/multifish/fleishmang/stream/stream.sh'

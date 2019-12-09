@@ -6,6 +6,7 @@ from os.path import dirname, isfile
 import z5py
 import json
 import gc
+from itertools import product
 
 
 # READERS
@@ -19,10 +20,13 @@ def read_coords(path):
 
 def read_fields(neighbors, suffix):
     fields = {}
-    for key in neighbors.keys():
-        if neighbors[key] and key != 'pos':
+    keys = neighbors.keys()
+    for key in keys.sort():
+        if neighbors[key]:
             if isfile(neighbors[key] + suffix):
                 fields[key], m = nrrd.read(neighbors[key] + suffix)
+        else:
+            fields[key] = np.zeros_like( fields['000'] )
     return fields
 
 
@@ -40,13 +44,17 @@ def read_n5_reference_grid(n5_path, subpath):
 
 
 # WRITERS
-def create_n5_dataset(n5_path, subpath, sh, xy_overlap):
+def create_n5_dataset(n5_path, subpath, sh, xy_overlap, z_overlap):
     n5im = z5py.File(n5_path, use_zarr_format=False)
     try:
-        n5im.create_dataset('/c0'+subpath, shape=sh[::-1], chunks=(70, xy_overlap, xy_overlap), dtype=np.float32)
-        n5im.create_dataset('/c1'+subpath, shape=sh[::-1], chunks=(70, xy_overlap, xy_overlap), dtype=np.float32)
-        n5im.create_dataset('/c2'+subpath, shape=sh[::-1], chunks=(70, xy_overlap, xy_overlap), dtype=np.float32)
+        n5im.create_dataset('/c0'+subpath, shape=sh[::-1], 
+                            chunks=(z_overlap, xy_overlap, xy_overlap), dtype=np.float32)
+        n5im.create_dataset('/c1'+subpath, shape=sh[::-1],
+                            chunks=(z_overlap, xy_overlap, xy_overlap), dtype=np.float32)
+        n5im.create_dataset('/c2'+subpath, shape=sh[::-1],
+                            chunks=(z_overlap, xy_overlap, xy_overlap), dtype=np.float32)
     except:
+        # TODO: should only pass if it's a "File already exists" exception
         pass
     return n5im
 
@@ -90,44 +98,82 @@ def transform_grid(matrix, grid):
 
 # HANDLE OVERLAPS
 def get_neighbors(tiledir, index, suffix='/*/coords.txt'):
-    
-    neighbors = { 'center':False,
-                  'right':False,
-                  'bottom':False,
-                  'right-bottom':False }
 
+    bin_strs = [''.join(p) for p in product('10', repeat=3)]
+    neighbors = { a:b for a, b in zip(bin_strs, [False,]*8) }
     tiles = glob.glob(tiledir + suffix)
     for tile in tiles:
         oo, ee, ii = read_coords(tile)
-        tile = dirname(tile)
-        index_diff = ii - index
-        if   (index_diff == [0, 0]).all(): neighbors['center'] = tile
-        elif (index_diff == [1, 0]).all(): neighbors['bottom'] = tile
-        elif (index_diff == [0, 1]).all(): neighbors['right'] = tile
-        elif (index_diff == [1, 1]).all(): neighbors['right-bottom'] = tile
+        key = ''.join( [str(i) for i in ii - index] )
+        if key in neighbors.keys(): neighbors[key] = dirname(tile)
     return neighbors
 
 
-def reconcile_warps(lcc, warps, xy_overlap):
+def slice_dict(step, xy_overlap, z_overlap):
 
-    cs = slice(-xy_overlap, None)
-    os = slice(None, xy_overlap)
-    if 'right' in lcc.keys() and 'right' in warps.keys():
-        updates = lcc['center'][cs] < lcc['right'][os]
-        warps['center'][cs][updates] = warps['right'][os][updates]
-    if 'bottom' in lcc.keys() and 'bottom' in warps.keys():
-        updates = lcc['center'][:, cs] < lcc['bottom'][:, os]
-        warps['center'][:, cs][updates] = warps['bottom'][:, os][updates]
-    if 'right-bottom' in lcc.keys() and 'right-bottom' in warps.keys():
-        corner = np.maximum.reduce([lcc['center'][cs, cs], lcc['right'][os, cs],
-                                    lcc['bottom'][cs, os], lcc['right-bottom'][os, os]])
-        updates = corner == lcc['right'][os, cs]
-        warps['center'][cs, cs][updates] = warps['right'][os, cs][updates]
-        updates = corner == lcc['bottom'][cs, os]
-        warps['center'][cs, cs][updates] = warps['bottom'][cs, os][updates]
-        updates = corner == lcc['right-bottom'][os, os]
-        warps['center'][cs, cs][updates] = warps['right-bottom'][os, os][updates]
-    return warps['center']
+    a = slice(None, None)
+    b = slice(-xy_overlap, None)
+    c = slice(None, xy_overlap)
+    d = slice(-z_overlap, None)
+    e = slice(None, z_overlap)
+
+    if step == 1:
+        return { '100':{'000':[a, b, a], '100':[a, c, a]},
+                 '010':{'000':[b, a, a], '010':[c, a, a]},
+                 '001':{'000':[a, a, d], '001':[a, a, e]} }
+    if step == 2:
+        return { '110':{'000':[b, b, a], '100':[b, c, a], '010':[c, b, a], '110':[c, c, a]},
+                 '101':{'000':[a, b, d], '001':[a, b, e], '100':[a, c, d], '101':[a, c, e]},
+                 '011':{'000':[b, a, d], '010':[c, a, d], '001':[b, a, e], '011':[c, a, e]} }
+    if step == 3:
+        return { '000':[b, b, d], '100':[b, c, d], '010':[c, b, d], '001':[b, b, e],
+                 '111':[c, c, e], '110':[c, c, d], '101':[b, c, e], '011':[c, b, e] }
+
+
+def reconcile_one_step_neighbor(lcc, warps, bin_str, xy_overlap, z_overlap):
+
+    SD = slice_dict(1, xy_overlap, z_overlap)[bin_str]
+    updates = lcc['000'][ SD['000'] ] < lcc[bin_str][ SD[bin_str] ]
+    warps['000'][ SD['000'] ][updates] = warps[bin_str][ SD[bin_str] ][updates]
+    return warps['000']
+
+
+def reconcile_two_step_neighbor(lcc, warps, bin_str, xy_overlap, z_overlap):
+
+    SD = slice_dict(2, xy_overlap, z_overlap)[bin_str]
+    corner = np.maximum.reduce( [lcc[k][ SD[k] ] for k in SD.keys()] )
+    for key in SD.keys():
+        updates = corner == lcc[key][ SD[key] ]
+        warps['000'][ SD['000'] ][updates] = warps[key][ SD[key] ][updates]
+    return warps['000']
+
+
+def reconcile_three_step_neighbor(lcc, warps, bin_str, xy_overlap, z_overlap):
+
+    SD = slice_dict(3, xy_overlap, z_overlap)
+    corner = np.maximum.reduce( [lcc[k][ SD[k] ] for k in SD.keys()] )
+    for key in SD.keys():
+        updates = corner == lcc[key][ SD[key] ]
+        warps['000'][ SD['000'] ][updates] = warps[key][ SD[key] ][updates]
+    return warps['000']
+
+
+def reconcile_warps(lcc, warps, xy_overlap, z_overlap):
+
+    bin_strs = [''.join(p) for p in product('10', repeat=3)]
+    for bin_str in bin_strs:
+        bin_str_array = np.array( [int(i) for i in bin_str] )
+        if np.sum(bin_str_array) == 1:
+            warps['000'] = reconcile_one_step_neighbor(lcc, warps, bin_str, xy_overlap, z_overlap)
+    for bin_str in bin_strs:
+        bin_str_array = np.array( [int(i) for i in bin_str] )
+        if np.sum(bin_str_array) == 2:
+            warps['000'] = reconcile_two_step_neighbor(lcc, warps, bin_str, xy_overlap, z_overlap)
+    for bin_str in bin_strs:
+        bin_str_array = np.array( [int(i) for i in bin_str] )
+        if np.sum(bin_str_array) == 3:
+            warps['000'] = reconcile_three_step_neighbor(lcc, warps, bin_str, xy_overlap, z_overlap)
+    return warps['000']
 
 
 # TODO: 
@@ -167,6 +213,7 @@ if __name__ == '__main__':
 
     # handle overlap regions
     neighbors = get_neighbors(tiledir, index)
+
     if isfile(neighbors['center']+'/final_lcc.nrrd'):
         lcc = read_fields(neighbors, suffix='/final_lcc.nrrd')
         for key in lcc.keys():
@@ -186,19 +233,24 @@ if __name__ == '__main__':
         updated_warp = updated_warp[xy_overlap:, xy_overlap:]
         updated_invwarp = updated_invwarp[xy_overlap:, xy_overlap:]
         oo[0:2] += xy_overlap
-    elif index[1] == 0:
+    elif index[1] != 0:
         updated_warp = updated_warp[:, xy_overlap:]
         updated_invwarp = updated_invwarp[:, xy_overlap:]
         oo[1] += xy_overlap
-    elif index[0] == 0:
+    elif index[0] != 0:
         updated_warp = updated_warp[xy_overlap:, :]
         updated_invwarp = updated_invwarp[xy_overlap:, :]
         oo[0] += xy_overlap
 
+    if index[2] != 0:
+        updated_warp = updated_warp[..., z_overlap:]
+        updated_invwarp = updated_invwarp[..., z_overlap:]
+        oo[2] += z_overlap
+
     # write results
     ref_grid = read_n5_reference_grid(reference, ref_subpath)
-    n5im = create_n5_dataset(output, output_subpath, ref_grid, xy_overlap)
+    n5im = create_n5_dataset(output, output_subpath, ref_grid, xy_overlap, z_overlap)
     write_updated_transform(n5im, output_subpath, updated_warp, oo)
-    n5im = create_n5_dataset(invoutput, output_subpath, ref_grid, xy_overlap)
+    n5im = create_n5_dataset(invoutput, output_subpath, ref_grid, xy_overlap, z_overlap)
     write_updated_transform(n5im, output_subpath, updated_invwarp, oo)
 
