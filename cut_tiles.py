@@ -12,7 +12,7 @@ def read_reference_grid(n5_path, subpath):
     """Read grid dimensions from n5 file"""
     with open(n5_path + subpath + '/attributes.json') as atts:
         atts = json.load(atts)
-    return tuple(atts['dimensions'])
+    return np.array(atts['dimensions']).astype(np.uint16)
 
 
 def read_n5_spacing(n5_path, subpath):
@@ -38,40 +38,37 @@ if __name__ == '__main__':
     xy_overlap             = int(sys.argv[5])
     z_stride               = int(sys.argv[6])
     z_overlap              = int(sys.argv[7])
+    min_tile_size          = 128
 
-
+    grid          = read_reference_grid(ref_img_path, ref_img_subpath)
+    stride        = np.array([xy_stride, xy_stride, z_stride], dtype=np.uint16)
+    overlap       = np.array([xy_overlap, xy_overlap, z_overlap], dtype=np.uint16)
+    tile_grid     = [ x//y+1 if x % y >= min_tile_size else x//y for x, y in zip(grid, stride-overlap) ]
+    
     vox           = read_n5_spacing(ref_img_path, ref_img_subpath)
-    grid          = read_reference_grid(ref_img_path, ref_img_subpath) * vox
-    stride        = np.array([xy_stride, xy_stride, z_stride]) * vox
-    overlap       = np.array([xy_overlap, xy_overlap, z_overlap]) * vox
+    grid          = grid * vox
+    stride        = stride * vox
+    overlap       = overlap * vox
     offset        = np.array([0., 0., 0.])
-    index         = np.array([0, 0, 0])
-    tile_counter  = 0
 
-    
-    while offset[2] + overlap[2] < grid[2]:
-        while offset[0] + overlap[0] < grid[0]:
-            while offset[1] + overlap[1] < grid[1]:
-            
-                ttt = tiles_dir + '/' + str(tile_counter)
+
+    for zzz in range(tile_grid[2]):
+        for yyy in range(tile_grid[1]):
+            for xxx in range(tile_grid[0]):
+
+                ttt = tiles_dir + '/' + str(xxx + yyy*tile_grid[0] + zzz*tile_grid[0]*tile_grid[1])
                 makedirs(ttt, exist_ok=True)
-    
-                local_extent = np.minimum(stride, grid - offset)
-                write_coords_file(ttt + '/coords.txt', offset, local_extent, index)
-    
-                index[0] += 1
-                tile_counter += 1
-                offset[1] += stride[1] - overlap[1]
 
-            index[0] = 0
-            index[1] += 1
-            offset[1] = 0.
-            offset[0] += stride[0] - overlap[0]
+                iii = [xxx, yyy, zzz]
+                extent = [grid[i]-offset[i] if iii[i] == tile_grid[i]-1 else stride[i] for i in range(3)]
+                write_coords_file(ttt + '/coords.txt', offset, extent, iii)
 
-        index[0] = 0
-        index[1] = 0
-        index[2] += 1
-        offset[1] = 0
+                offset[0] += stride[0] - overlap[0]
+
+            offset[0] = 0.
+            offset[1] += stride[1] - overlap[1]
+
         offset[0] = 0
+        offset[1] = 0
         offset[2] += stride[2] - overlap[2]
-    
+ 

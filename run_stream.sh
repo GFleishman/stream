@@ -6,7 +6,7 @@ fixed="/groups/multifish/multifish/Yuhan/Stitch/CEA_3_R6/Stitch/n5"
 # the moving n5 image
 moving="/groups/multifish/multifish/Yuhan/Stitch/CEA_3_R7/Stitch/n5"
 # the folder where you'd like all outputs to be written
-outdir="/groups/multifish/multifish/fleishmang/test_overlap_blocksize"
+outdir="/groups/multifish/multifish/fleishmang/testing_stitch"
 
 
 # the channel used to drive registration
@@ -16,9 +16,9 @@ aff_scale="s3"
 # the scale level for deformable alignments
 def_scale="s2"
 # the number of voxels along x/y for registration tiling, must be power of 2
-xy_stride=512
+xy_stride=256
 # the number of voxels along z for registration tiling, must be power of 2
-z_stride=512
+z_stride=256
 
 # computational parameters
 little_gaussian_stddev="later"

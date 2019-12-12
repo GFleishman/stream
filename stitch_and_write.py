@@ -20,8 +20,9 @@ def read_coords(path):
 
 def read_fields(neighbors, suffix):
     fields = {}
-    keys = neighbors.keys()
-    for key in keys.sort():
+    keys = list(neighbors.keys())
+    keys.sort()
+    for key in keys:
         if neighbors[key]:
             if isfile(neighbors[key] + suffix):
                 fields[key], m = nrrd.read(neighbors[key] + suffix)
@@ -48,11 +49,14 @@ def create_n5_dataset(n5_path, subpath, sh, xy_overlap, z_overlap):
     n5im = z5py.File(n5_path, use_zarr_format=False)
     try:
         n5im.create_dataset('/c0'+subpath, shape=sh[::-1], 
-                            chunks=(z_overlap, xy_overlap, xy_overlap), dtype=np.float32)
+                            chunks=(z_overlap, xy_overlap, xy_overlap),
+                            dtype=np.float32, level=9)
         n5im.create_dataset('/c1'+subpath, shape=sh[::-1],
-                            chunks=(z_overlap, xy_overlap, xy_overlap), dtype=np.float32)
+                            chunks=(z_overlap, xy_overlap, xy_overlap),
+                            dtype=np.float32, level=9)
         n5im.create_dataset('/c2'+subpath, shape=sh[::-1],
-                            chunks=(z_overlap, xy_overlap, xy_overlap), dtype=np.float32)
+                            chunks=(z_overlap, xy_overlap, xy_overlap),
+                            dtype=np.float32, level=9)
     except:
         # TODO: should only pass if it's a "File already exists" exception
         pass
@@ -118,16 +122,16 @@ def slice_dict(step, xy_overlap, z_overlap):
     e = slice(None, z_overlap)
 
     if step == 1:
-        return { '100':{'000':[a, b, a], '100':[a, c, a]},
-                 '010':{'000':[b, a, a], '010':[c, a, a]},
-                 '001':{'000':[a, a, d], '001':[a, a, e]} }
+        return { '100':{'000':(b, a, a), '100':(c, a, a)},
+                 '010':{'000':(a, b, a), '010':(a, c, a)},
+                 '001':{'000':(a, a, d), '001':(a, a, e)} }
     if step == 2:
-        return { '110':{'000':[b, b, a], '100':[b, c, a], '010':[c, b, a], '110':[c, c, a]},
-                 '101':{'000':[a, b, d], '001':[a, b, e], '100':[a, c, d], '101':[a, c, e]},
-                 '011':{'000':[b, a, d], '010':[c, a, d], '001':[b, a, e], '011':[c, a, e]} }
+        return { '110':{'000':(b, b, a), '100':(c, b, a), '010':(b, c, a), '110':(c, c, a)},
+                 '101':{'000':(b, a, d), '001':(b, a, e), '100':(c, a, d), '101':(c, a, e)},
+                 '011':{'000':(a, b, d), '010':(a, c, d), '001':(a, b, e), '011':(a, c, e)} }
     if step == 3:
-        return { '000':[b, b, d], '100':[b, c, d], '010':[c, b, d], '001':[b, b, e],
-                 '111':[c, c, e], '110':[c, c, d], '101':[b, c, e], '011':[c, b, e] }
+        return { '000':(b, b, d), '100':(c, b, d), '010':(b, c, d), '001':(b, b, e),
+                 '111':(c, c, e), '011':(b, c, e), '101':(c, b, e), '110':(c, c, d) }
 
 
 def reconcile_one_step_neighbor(lcc, warps, bin_str, xy_overlap, z_overlap):
@@ -160,6 +164,7 @@ def reconcile_three_step_neighbor(lcc, warps, bin_str, xy_overlap, z_overlap):
 
 def reconcile_warps(lcc, warps, xy_overlap, z_overlap):
 
+    # ones before twos before threes
     bin_strs = [''.join(p) for p in product('10', repeat=3)]
     for bin_str in bin_strs:
         bin_str_array = np.array( [int(i) for i in bin_str] )
@@ -176,6 +181,7 @@ def reconcile_warps(lcc, warps, xy_overlap, z_overlap):
     return warps['000']
 
 
+
 # TODO: 
 #       modify to accommodate overlaps in Z
 #       add simpler overlap reconciliation methods: averaging, weighted averaging
@@ -183,7 +189,7 @@ if __name__ == '__main__':
 
     tile            = sys.argv[1]
     xy_overlap      = int(sys.argv[2])
-    z_overlap       = sys.argv[3]
+    z_overlap       = int(sys.argv[3])
     reference       = sys.argv[4]
     ref_subpath     = sys.argv[5]
     global_affine   = sys.argv[6]
@@ -214,15 +220,15 @@ if __name__ == '__main__':
     # handle overlap regions
     neighbors = get_neighbors(tiledir, index)
 
-    if isfile(neighbors['center']+'/final_lcc.nrrd'):
+    if isfile(neighbors['000']+'/final_lcc.nrrd'):
         lcc = read_fields(neighbors, suffix='/final_lcc.nrrd')
         for key in lcc.keys():
             lcc[key][lcc[key] > 1.0] = 0  # typically in noisy regions
         warps = read_fields(neighbors, suffix='/warp.nrrd')
-        updated_warp += reconcile_warps(lcc, warps, xy_overlap)
+        updated_warp += reconcile_warps(lcc, warps, xy_overlap, z_overlap)
         del warps; gc.collect()  # need space for inv_warps
         inv_warps = read_fields(neighbors, suffix='/invwarp.nrrd')
-        updated_invwarp += reconcile_warps(lcc, inv_warps, xy_overlap)
+        updated_invwarp += reconcile_warps(lcc, inv_warps, xy_overlap, z_overlap)
         
     # OPTIONAL: SMOOTH THE OVERLAP REGIONS
     # OPTIONAL: USE WEIGHTED COMBINATION BASED ON LCC AT ALL VOXELS

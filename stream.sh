@@ -41,9 +41,10 @@ function initialize_environment {
   BILLING='multifish'
   PYTHON='/groups/scicompsoft/home/fleishmang/bin/miniconda3/bin/python3'
   SCRIPTS='/groups/multifish/multifish/fleishmang/stream'
+  CUT_TILES="$PYTHON ${SCRIPTS}/cut_tiles.py"
   SPOTS="$PYTHON ${SCRIPTS}/spots.py"
   RANSAC="$PYTHON ${SCRIPTS}/ransac.py"
-  CUT_TILES="$PYTHON ${SCRIPTS}/cut_tiles.py"
+  INTERPOLATE_AFFINES="$PYTHON ${SCRIPTS}/interpolate_affines.py"
   DEFORM="$PYTHON ${SCRIPTS}/deform.py"
   STITCH="$PYTHON ${SCRIPTS}/stitch_and_write.py"
   APPLY_TRANSFORM="$PYTHON ${SCRIPTS}/apply_transform_n5.py"
@@ -100,7 +101,7 @@ for tile in $( ls -d ${tiledir}/*[0-9] ); do
 
   tile_num=`basename $tile`
 
-  submit "spots${tile_num}" "apply_affine_small" 1 \
+  submit "spots${tile_num}" '' 1 \
   $SPOTS $fixed /${channel}/${aff_scale} ${tile}/fixed_spots.pkl ${tile}/coords.txt
 
   submit "spots${tile_num}" "apply_affine_small" 1 \
@@ -108,8 +109,14 @@ for tile in $( ls -d ${tiledir}/*[0-9] ); do
 
   submit "ransac${tile_num}" "spots${tile_num}" 1 \
   $RANSAC ${tile}/fixed_spots.pkl ${tile}/moving_spots.pkl ${tile}/ransac_affine.mat
+done
 
-  submit "deform${tile_num}" "ransac${tile_num},apply_affine_big" 1 \
+submit "interpolate_affines" 'ransac*' 1 \
+$INTERPOLATE_AFFINES $tiledir
+
+for tile in $( ls -d ${tiledir}/*[0-9] ); do
+  tile_num=`basename $tile`
+  submit "deform${tile_num}" "interpolate_affines,apply_affine_big" 1 \
   $DEFORM $fixed /${channel}/${def_scale} ${affdir}/ransac_affine /${channel}/${def_scale} \
           ${tile}/coords.txt ${tile}/warp.nrrd \
           ${tile}/ransac_affine.mat ${tile}/final_lcc.nrrd \

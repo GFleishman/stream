@@ -22,6 +22,7 @@ def save_PKL(filename,var):
     pickle.dump(var,f)
     f.close()
 
+
 def gauss_conv_volume(image, sigmas):
     # implement DOG locally
     x = int(round(2*sigmas[1]))  # sigmas[1] > sigmas[0]
@@ -31,27 +32,45 @@ def gauss_conv_volume(image, sigmas):
     g2 = multivariate_normal.pdf(x, mean=[0,]*3, cov=np.diag([sigmas[1],]*3))
     return convolve(image, g1 - g2)
 
-def max_filt_volume(image, min_distance):
-    return maximum_filter(image, min_distance)
+
+def get_local_max(image, min_distance=3, threshold=None):
+    image_max = maximum_filter(image, min_distance)
+    if threshold:
+        mask = np.logical_and(image == image_max, image >= threshold) # threshold of DoG NOT raw!
+    else:
+        mask = image == image_max
+    return np.column_stack(np.nonzero(mask))
 
 
-def get_context(img,pos,window,interpmap=False):
-    w=img[pos[0]-window:pos[0]+window+1, pos[1]-window:pos[1]+window+1, pos[2]-window:pos[2]+window+1]
-    width=2*window+1
-    if w.size!=width**3: #just ignore near edge
+def tw_blob_dog(image, min_sigma=1, sigma_ratio=1.6, threshold=2.0, min_distance=5, overlap=.5):
+    DoG = gauss_conv_volume(image, [min_sigma, min_sigma*sigma_ratio])
+    coord = get_local_max(DoG, min_distance=min_distance)
+    intensities = image[coord[:,0], coord[:,1], coord[:,2]]
+    filtered = intensities > threshold
+    coord = np.hstack( (coord[filtered],
+                        np.array( [intensities[filtered]] ).T, 
+                        np.full( (sum(filtered), 1), min_sigma) ) )
+    return coord
+
+
+def get_context(img, pos, radius, interpmap=False):
+    w = img[pos[0]-radius:pos[0]+radius+1, pos[1]-radius:pos[1]+radius+1, pos[2]-radius:pos[2]+radius+1]
+    if np.product(w.shape) != (2*radius+1)**3: #just ignore near edge
         return(False)
     if interpmap:
         return(map_coordinates(w,interpmap,order=3).reshape((width[0],width[1],width[2])))
     else:
         return(w)
 
-def scan(img,spots,window,vox,interpmap=None):
-    output=[]   
+
+def scan(img, spots, radius, interpmap=None):
+    output=[]
     for spot in spots:
-        w=get_context(img,spot,window,interpmap)
-        if type(w)!=bool:
-            output.append([spot*vox,w])
+        w = get_context(img, spot, radius, interpmap)
+        if type(w) != bool:
+            output.append([spot, w])
     return(output)
+
 
 def prune_blobs(blobs_array, overlap, distance):
     tree = spatial.cKDTree(blobs_array[:, :-2])
@@ -64,22 +83,6 @@ def prune_blobs(blobs_array, overlap, distance):
             else:
                 blob1[-2] = 0
     return np.array([b for b in blobs_array if b[-2] > 0])
-
-def get_local_max(image, min_distance=3, threshold=None):
-    image_max = max_filt_volume(image, min_distance)
-    if threshold:
-        mask = np.logical_and(image == image_max, image >= threshold) # threshold of DoG NOT raw!
-    else:
-        mask = image == image_max
-    return(np.column_stack(np.nonzero(mask)))
-        
-def tw_blob_dog(image, min_sigma=1, sigma_ratio=1.6, threshold=2.0, min_distance=5, overlap=.5):
-    DoG = gauss_conv_volume(image, [min_sigma, min_sigma*sigma_ratio])
-    coord=get_local_max(DoG, min_distance=min_distance)
-    intensities=image[coord[:,0],coord[:,1],coord[:,2]]
-    filtered=intensities>threshold
-    coord=np.hstack((coord[filtered],np.array([intensities[filtered]]).T,np.full((sum(filtered),1),min_sigma)))
-    return(coord)
 
 
 def read_n5_spacing(n5_path, subpath):
@@ -103,23 +106,32 @@ def read_coords(path):
 # MAIN
 # get the data
 # z5py formats data (z, y, x) by default
+radius = 8
 z5im = z5py.File(sys.argv[1], use_zarr_format=False)[sys.argv[2]]
 vox = read_n5_spacing(sys.argv[1], sys.argv[2])
-
 if sys.argv[4] != 'coarse':
     offset, extent = read_coords(sys.argv[4])
-    oo = np.round(offset/vox).astype(np.uint16)
-    ee = oo + np.round(extent/vox).astype(np.uint16)
-    im = z5im[oo[2]:ee[2], oo[1]:ee[1], oo[0]:ee[0]]
+    oo = np.round(offset/vox).astype(np.int16)
+    ee = oo + np.round(extent/vox).astype(np.int16)
+    oo_rad = np.maximum(0, oo-radius)
+    ee_rad = ee + radius
+    im = z5im[oo_rad[2]:ee_rad[2], oo_rad[1]:ee_rad[1], oo_rad[0]:ee_rad[0]]
 else:
     im = z5im[:, :, :]
-
 im = np.moveaxis(im, (0, 2), (2, 0))
 im = im.astype(np.float64)
 
 # get the spots
-coord=tw_blob_dog(im,1,2)
-sortIdx=np.argsort(coord[:,-2])[::-1]
+coord = tw_blob_dog(im, 1, 2)
+
+# throw out spots in the margins
+if sys.argv[4] != 'coarse':
+    filtered = np.logical_and(coord[:, :3] >= (oo - oo_rad), coord[:, :3] < (ee - oo_rad))
+    filtered = filtered[:, 0] * filtered[:, 1] * filtered[:, 2]
+    coord = coord[filtered]
+
+
+sortIdx = np.argsort(coord[:, -2])[::-1]
 spotNum=2000
 
 # prune the spots
@@ -132,12 +144,18 @@ if sys.argv[4] == 'coarse':
 else:
     sortedSpots=coord[sortIdx,:][:spotNum]
 
-
 # final prune and save
-min_distance=6
-overlap=0.01
-window=8
-pruned_spots=prune_blobs(sortedSpots,overlap,min_distance)[:,:-2].astype(np.int)
-context=scan(im,pruned_spots,window,vox)
-save_PKL(sys.argv[3],context)
-    
+min_distance = 6
+overlap = 0.01
+pruned_spots = prune_blobs(sortedSpots, overlap, min_distance)[:,:-2].astype(np.int)
+context = scan(im, pruned_spots, radius)
+
+# correct offset
+if sys.argv[4] != 'coarse':
+    points = [ [(p[0] - (oo - oo_rad))*vox, p[1]] for p in context ]
+else:
+    points = [ [p[0]*vox, p[1]] for p in context]
+
+# write output
+save_PKL(sys.argv[3], points)
+
