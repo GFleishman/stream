@@ -14,6 +14,7 @@ from scipy.stats import multivariate_normal
 import numpy as np
 import sys
 import pickle
+import n5_metadata_utils as n5mu
 from skimage.feature.blob import _blob_overlap
 
 
@@ -85,15 +86,6 @@ def prune_blobs(blobs_array, overlap, distance):
     return np.array([b for b in blobs_array if b[-2] > 0])
 
 
-def read_n5_spacing(n5_path, subpath):
-    # get the voxel spacing
-    # metadata is properly (x, y, z)
-    with open(n5_path + subpath + '/attributes.json') as atts:
-        atts = json.load(atts)
-    vox = np.absolute(np.array(atts['pixelResolution']) * np.array(atts['downsamplingFactors']))
-    return vox.astype(np.float64)
-
-
 def read_coords(path):
     with open(path, 'r') as f:
         offset = np.array(f.readline().split(' ')).astype(np.float64)
@@ -108,7 +100,7 @@ def read_coords(path):
 # z5py formats data (z, y, x) by default
 radius = 8
 z5im = z5py.File(sys.argv[1], use_zarr_format=False)[sys.argv[2]]
-vox = read_n5_spacing(sys.argv[1], sys.argv[2])
+vox = n5mu.read_voxel_spacing(sys.argv[1], sys.argv[2]).astype(np.float64)
 if sys.argv[4] != 'coarse':
     offset, extent = read_coords(sys.argv[4])
     oo = np.round(offset/vox).astype(np.int16)

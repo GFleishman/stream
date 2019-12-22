@@ -4,22 +4,9 @@ import z5py
 import json
 import sys
 import numpy as np
+import n5_metadata_utils as n5mu
 from os.path import abspath
 from os import makedirs
-
-
-def read_reference_grid(n5_path, subpath):
-    """Read grid dimensions from n5 file"""
-    with open(n5_path + subpath + '/attributes.json') as atts:
-        atts = json.load(atts)
-    return np.array(atts['dimensions']).astype(np.uint16)
-
-
-def read_n5_spacing(n5_path, subpath):
-    """Read voxel spacing from n5 file"""
-    with open(n5_path + subpath + '/attributes.json') as atts:
-        atts = json.load(atts)
-    return np.absolute(np.array(atts['pixelResolution']) * np.array(atts['downsamplingFactors']))
 
 
 def write_coords_file(path, offset, extent, index):
@@ -40,12 +27,12 @@ if __name__ == '__main__':
     z_overlap              = int(sys.argv[7])
     min_tile_size          = 128
 
-    grid          = read_reference_grid(ref_img_path, ref_img_subpath)
+    grid          = n5mu.read_voxel_grid(ref_img_path, ref_img_subpath)
     stride        = np.array([xy_stride, xy_stride, z_stride], dtype=np.uint16)
     overlap       = np.array([xy_overlap, xy_overlap, z_overlap], dtype=np.uint16)
     tile_grid     = [ x//y+1 if x % y >= min_tile_size else x//y for x, y in zip(grid, stride-overlap) ]
-    
-    vox           = read_n5_spacing(ref_img_path, ref_img_subpath)
+   
+    vox           = n5mu.read_voxel_spacing(ref_img_path, ref_img_subpath) 
     grid          = grid * vox
     stride        = stride * vox
     overlap       = overlap * vox

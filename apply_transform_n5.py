@@ -2,6 +2,7 @@ import z5py
 import numpy as np
 import json
 import sys
+import n5_metadata_utils as n5mu
 from scipy.ndimage import map_coordinates
 from os.path import splitext, abspath, isdir
 
@@ -26,49 +27,15 @@ def interpolate_image(img, X, order=1):
 
 
 def read_n5_data(n5_path, subpath):
-    # get the data
-    # z5py formats data (z, y, x) by default
     im = z5py.File(n5_path, use_zarr_format=False)[subpath][:, :, :]
     return np.moveaxis(im, (0, 2), (2, 0))
 
-def read_n5_spacing(n5_path, subpath):
-    # get the voxel spacing
-    # metadata is properly (x, y, z)
-    with open(n5_path + subpath + '/attributes.json') as atts:
-        atts = json.load(atts)
-    vox = np.absolute(np.array(atts['pixelResolution']) * np.array(atts['downsamplingFactors']))
-    return vox.astype(np.float32)
 
-
-def read_matrix(matrix_path):
-    """read affine matrix from file to array"""
-    matrix = np.loadtxt(matrix_path)
-    return np.float32(matrix)
-
-
-def write_aff_n5(n5_path, subpath, aff_im):
-    aff_im = np.moveaxis(aff_im, (0, 2), (2, 0))
-    im = z5py.File(n5_path, use_zarr_format=False)
-    im.create_dataset(subpath, shape=aff_im.shape, chunks=(70, 128, 128), dtype=aff_im.dtype)
-    im[subpath][:, :, :] = aff_im
-
-
-def read_reference_grid(n5_path, subpath):
-    with open(n5_path + subpath + '/attributes.json') as atts:
-        atts = json.load(atts)
-    return tuple(atts['dimensions'])
-
-
-def copy_metadata(ref_path, ref_subpath, out_path, out_subpath):
-    with open(ref_path + ref_subpath + '/attributes.json') as atts:
-        ref_atts = json.load(atts)
-    with open(out_path + out_subpath + '/attributes.json') as atts:
-        out_atts = json.load(atts)
-    for k in ref_atts.keys():
-        if k not in out_atts.keys():
-            out_atts[k] = ref_atts[k]
-    with open(out_path + out_subpath + '/attributes.json', 'w') as atts:
-        json.dump(out_atts, atts)
+def write_n5(n5_path, subpath, im):
+    im = np.moveaxis(im, (0, 2), (2, 0))
+    out = z5py.File(n5_path, use_zarr_format=False)
+    out.create_dataset(subpath, shape=im.shape, chunks=(70, 128, 128), dtype=im.dtype)
+    out[subpath][:, :, :] = im
 
 
 def read_n5_transform(n5_path, subpath):
@@ -93,20 +60,33 @@ if __name__ == '__main__':
     txm_path         = sys.argv[5]
     out_path         = sys.argv[6]
 
+    points_path = None
+    if len(sys.argv) == 8:
+        points_path = sys.argv[7]
+
 
     ext   = splitext(txm_path)[1]
-    vox   = read_n5_spacing(mov_img_path, mov_img_subpath)
+    vox   = n5mu.read_voxel_spacing(mov_img_path, mov_img_subpath)
     if ext == '.mat':
-        matrix     = read_matrix(txm_path)
-        grid       = read_reference_grid(ref_img_path, ref_img_subpath)
+        matrix     = np.float32(np.loadtxt(txm_path))
+        grid       = n5mu.read_voxel_grid(ref_img_path, ref_img_subpath)
         grid       = position_grid(grid) * vox
         grid       = transform_grid(matrix, grid)
     elif ext in ['', '.n5']:
         grid       = read_n5_transform(txm_path, '/s2')
- 
-    im  = read_n5_data(mov_img_path, mov_img_subpath)
-    im  = interpolate_image(im, grid/vox)
 
-    write_aff_n5(out_path, ref_img_subpath, im)
-    copy_metadata(ref_img_path, ref_img_subpath, out_path, ref_img_subpath)
+    if points_path is None:
+        im  = read_n5_data(mov_img_path, mov_img_subpath)
+        im  = interpolate_image(im, grid/vox)
+        write_n5(out_path, ref_img_subpath, im)
+        n5mu.transfer_metadata(ref_img_path, ref_img_subpath, out_path, ref_img_subpath)
+    else:
+        points                 = np.float32(np.loadtxt(points_path, delimiter=','))
+        warped_points          = np.empty_like(points)
+        warped_points[:, 0]    = interpolate_image(grid[..., 0], points[:, :3]/vox)
+        warped_points[:, 1]    = interpolate_image(grid[..., 1], points[:, :3]/vox)
+        warped_points[:, 2]    = interpolate_image(grid[..., 2], points[:, :3]/vox)
+        warped_points[:, -1]   = points[:, -1]
+        np.savetxt(out_path, warped_points)
+
 

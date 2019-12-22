@@ -3,15 +3,8 @@ import sys
 sys.path += ['/groups/scicompsoft/home/fleishmang/source/greedypy']
 import json
 import numpy as np
+import n5_metadata_utils as n5mu
 import greedypy as gp
-
-
-
-def read_n5_spacing(n5_path, subpath):
-    """Read voxel spacing from n5 file"""
-    with open(n5_path + subpath + '/attributes.json') as atts:
-        atts = json.load(atts)
-    return np.absolute(np.array(atts['pixelResolution']) * np.array(atts['downsamplingFactors']))
 
 
 def read_coords(path):
@@ -19,7 +12,6 @@ def read_coords(path):
         offset = np.array(f.readline().split(' ')).astype(np.float64)
         extent = np.array(f.readline().split(' ')).astype(np.float64)
     return offset, extent
-
 
 
 if __name__ == '__main__':
@@ -34,7 +26,7 @@ if __name__ == '__main__':
     final_lcc           = sys.argv[8]
     inverse             = sys.argv[9]
 
-    vox = read_n5_spacing(fixed, fixed_subpath)
+    vox = n5mu.read_voxel_spacing(fixed, fixed_subpath)
     offset, extent = read_coords(coords)
     oo = np.round(offset/vox).astype(np.uint16)
     ee = oo + np.round(extent/vox).astype(np.uint16)

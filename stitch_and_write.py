@@ -6,6 +6,7 @@ from os.path import dirname, isfile
 import z5py
 import json
 import gc
+import n5_metadata_utils as n5mu
 from itertools import product
 
 
@@ -31,21 +32,9 @@ def read_fields(neighbors, suffix):
     return fields
 
 
-def read_n5_spacing(n5_path, subpath):
-    with open(n5_path + subpath + '/attributes.json') as atts:
-        atts = json.load(atts)
-    vox = np.absolute(np.array(atts['pixelResolution']) * np.array(atts['downsamplingFactors']))
-    return vox.astype(np.float64)
-
-
-def read_n5_reference_grid(n5_path, subpath):
-    with open(n5_path + subpath + '/attributes.json') as atts:
-        atts = json.load(atts)
-    return tuple(atts['dimensions'])
-
-
 # WRITERS
 def create_n5_dataset(n5_path, subpath, sh, xy_overlap, z_overlap):
+    sh = tuple([x.item() for x in sh])
     n5im = z5py.File(n5_path, use_zarr_format=False)
     try:
         n5im.create_dataset('/c0'+subpath, shape=sh[::-1], 
@@ -57,7 +46,7 @@ def create_n5_dataset(n5_path, subpath, sh, xy_overlap, z_overlap):
         n5im.create_dataset('/c2'+subpath, shape=sh[::-1],
                             chunks=(z_overlap, xy_overlap, xy_overlap),
                             dtype=np.float32, level=9)
-    except:
+    except Exception as e:
         # TODO: should only pass if it's a "File already exists" exception
         pass
     return n5im
@@ -72,18 +61,6 @@ def write_updated_transform(n5im, subpath, updated_warp, oo):
     n5im['/c0'+subpath][oo[2]:ee[2], oo[1]:ee[1], oo[0]:ee[0]] = utx
     n5im['/c1'+subpath][oo[2]:ee[2], oo[1]:ee[1], oo[0]:ee[0]] = uty
     n5im['/c2'+subpath][oo[2]:ee[2], oo[1]:ee[1], oo[0]:ee[0]] = utz
-
-
-def copy_metadata(ref_path, ref_subpath, out_path, out_subpath):
-    with open(ref_path + ref_subpath + '/attributes.json') as atts:
-        ref_atts = json.load(atts)
-    with open(out_path + out_subpath + '/attributes.json') as atts:
-        out_atts = json.load(atts)
-    for k in ref_atts.keys():
-        if k not in out_atts.keys():
-            out_atts[k] = ref_atts[k]
-    with open(out_path + out_subpath + '/attributes.json', 'w') as atts:
-        json.dump(out_atts, atts)
 
 
 # FOR AFFINE TRANSFORM
@@ -113,7 +90,7 @@ def get_neighbors(tiledir, index, suffix='/*/coords.txt'):
     return neighbors
 
 
-def slice_dict(step, xy_overlap, z_overlap):
+def slice_dict(xy_overlap, z_overlap):
 
     a = slice(None, None)
     b = slice(-xy_overlap, None)
@@ -121,44 +98,47 @@ def slice_dict(step, xy_overlap, z_overlap):
     d = slice(-z_overlap, None)
     e = slice(None, z_overlap)
 
-    if step == 1:
-        return { '100':{'000':(b, a, a), '100':(c, a, a)},
-                 '010':{'000':(a, b, a), '010':(a, c, a)},
-                 '001':{'000':(a, a, d), '001':(a, a, e)} }
-    if step == 2:
-        return { '110':{'000':(b, b, a), '100':(c, b, a), '010':(b, c, a), '110':(c, c, a)},
-                 '101':{'000':(b, a, d), '001':(b, a, e), '100':(c, a, d), '101':(c, a, e)},
-                 '011':{'000':(a, b, d), '010':(a, c, d), '001':(a, b, e), '011':(a, c, e)} }
-    if step == 3:
-        return { '000':(b, b, d), '100':(c, b, d), '010':(b, c, d), '001':(b, b, e),
-                 '111':(c, c, e), '011':(b, c, e), '101':(c, b, e), '110':(c, c, d) }
+    SD =   { '100':{'000':(b, a, a), '100':(c, a, a)},
+             '010':{'000':(a, b, a), '010':(a, c, a)},
+             '001':{'000':(a, a, d), '001':(a, a, e)},
+             '110':{'000':(b, b, a), '100':(c, b, a), '010':(b, c, a), '110':(c, c, a)},
+             '101':{'000':(b, a, d), '001':(b, a, e), '100':(c, a, d), '101':(c, a, e)},
+             '011':{'000':(a, b, d), '010':(a, c, d), '001':(a, b, e), '011':(a, c, e)},
+             '111':{'000':(b, b, d), '100':(c, b, d), '010':(b, c, d), '001':(b, b, e),
+                    '111':(c, c, e), '011':(b, c, e), '101':(c, b, e), '110':(c, c, d)} }
+
+    w   = np.linspace(0, 1, xy_overlap)
+    x   = np.linspace(1, 0, xy_overlap)
+    y   = np.linspace(0, 1,  z_overlap)
+    z   = np.linspace(1, 0,  z_overlap)
+    opr = lambda a, b, i: np.expand_dims( np.outer(a, b), i )
+    trp = lambda a, b, c: np.einsum('i,j,k->ijk', a, b, c) 
+
+    W =    { '100':{'000':x[:, None, None], '100':w[:, None, None]},
+             '010':{'000':x[None, :, None], '010':w[None, :, None]},
+             '001':{'000':z[None, None, :], '001':y[None, None, :]},
+             '110':{'000':opr(x,x,2), '100':opr(w,x,2), '010':opr(x,w,2), '110':opr(w,w,2)},
+             '101':{'000':opr(x,z,1), '100':opr(w,z,1), '001':opr(x,y,1), '101':opr(w,y,1)},
+             '011':{'000':opr(x,z,0), '010':opr(w,z,0), '001':opr(x,y,0), '011':opr(w,y,0)},
+             '111':{'000':trp(x,x,z), '100':trp(w,x,z), '010':trp(x,w,z), '001':trp(x,x,y),
+                    '111':trp(w,w,y), '011':trp(x,w,y), '101':trp(w,x,y), '110':trp(w,w,z)} }
+
+    return SD, W
 
 
-def reconcile_one_step_neighbor(lcc, warps, bin_str, xy_overlap, z_overlap):
+def average_neighbors(lcc, warps, bin_str, xy_overlap, z_overlap, eps=0.8):
 
-    SD = slice_dict(1, xy_overlap, z_overlap)[bin_str]
-    updates = lcc['000'][ SD['000'] ] < lcc[bin_str][ SD[bin_str] ]
-    warps['000'][ SD['000'] ][updates] = warps[bin_str][ SD[bin_str] ][updates]
-    return warps['000']
-
-
-def reconcile_two_step_neighbor(lcc, warps, bin_str, xy_overlap, z_overlap):
-
-    SD = slice_dict(2, xy_overlap, z_overlap)[bin_str]
-    corner = np.maximum.reduce( [lcc[k][ SD[k] ] for k in SD.keys()] )
+    SD, W = slice_dict(xy_overlap, z_overlap)
+    SD, W = SD[bin_str], W[bin_str]
+    update = np.zeros_like( warps['000'][ SD['000'] ])
+    denom  = np.zeros_like(   lcc['000'][ SD['000'] ])
     for key in SD.keys():
-        updates = corner == lcc[key][ SD[key] ]
-        warps['000'][ SD['000'] ][updates] = warps[key][ SD[key] ][updates]
-    return warps['000']
-
-
-def reconcile_three_step_neighbor(lcc, warps, bin_str, xy_overlap, z_overlap):
-
-    SD = slice_dict(3, xy_overlap, z_overlap)
-    corner = np.maximum.reduce( [lcc[k][ SD[k] ] for k in SD.keys()] )
+        denom  += lcc[key][ SD[key] ]
+    denom[ denom == 0 ] = 1.0  # avoids divide by 0 warning
     for key in SD.keys():
-        updates = corner == lcc[key][ SD[key] ]
-        warps['000'][ SD['000'] ][updates] = warps[key][ SD[key] ][updates]
+        w       = eps * W[key] + (1 - eps) * lcc[key][ SD[key] ] / denom
+        update += w[..., None] * warps[key][ SD[key] ]
+    warps['000'][ SD['000'] ] = update
     return warps['000']
 
 
@@ -167,17 +147,14 @@ def reconcile_warps(lcc, warps, xy_overlap, z_overlap):
     # ones before twos before threes
     bin_strs = [''.join(p) for p in product('10', repeat=3)]
     for bin_str in bin_strs:
-        bin_str_array = np.array( [int(i) for i in bin_str] )
-        if np.sum(bin_str_array) == 1:
-            warps['000'] = reconcile_one_step_neighbor(lcc, warps, bin_str, xy_overlap, z_overlap)
+        if np.sum(np.array( [int(i) for i in bin_str] )) == 1:
+            warps['000'] = average_neighbors(lcc, warps, bin_str, xy_overlap, z_overlap)
     for bin_str in bin_strs:
-        bin_str_array = np.array( [int(i) for i in bin_str] )
-        if np.sum(bin_str_array) == 2:
-            warps['000'] = reconcile_two_step_neighbor(lcc, warps, bin_str, xy_overlap, z_overlap)
+        if np.sum(np.array( [int(i) for i in bin_str] )) == 2:
+            warps['000'] = average_neighbors(lcc, warps, bin_str, xy_overlap, z_overlap)
     for bin_str in bin_strs:
-        bin_str_array = np.array( [int(i) for i in bin_str] )
-        if np.sum(bin_str_array) == 3:
-            warps['000'] = reconcile_three_step_neighbor(lcc, warps, bin_str, xy_overlap, z_overlap)
+        if np.sum(np.array( [int(i) for i in bin_str] )) == 3:
+            warps['000'] = average_neighbors(lcc, warps, bin_str, xy_overlap, z_overlap)
     return warps['000']
 
 
@@ -200,7 +177,7 @@ if __name__ == '__main__':
 
     # read basic elements
     tiledir = dirname(tile)
-    vox = read_n5_spacing(reference, ref_subpath)
+    vox = n5mu.read_voxel_spacing(reference, ref_subpath)
     offset, extent, index = read_coords(tile + '/coords.txt')
 
     # initialize updated warp fields with global affine
@@ -223,7 +200,7 @@ if __name__ == '__main__':
     if isfile(neighbors['000']+'/final_lcc.nrrd'):
         lcc = read_fields(neighbors, suffix='/final_lcc.nrrd')
         for key in lcc.keys():
-            lcc[key][lcc[key] > 1.0] = 0  # typically in noisy regions
+            lcc[key][lcc[key] > 1.0] = 1.0  # typically in noisy regions
         warps = read_fields(neighbors, suffix='/warp.nrrd')
         updated_warp += reconcile_warps(lcc, warps, xy_overlap, z_overlap)
         del warps; gc.collect()  # need space for inv_warps
@@ -254,7 +231,7 @@ if __name__ == '__main__':
         oo[2] += z_overlap
 
     # write results
-    ref_grid = read_n5_reference_grid(reference, ref_subpath)
+    ref_grid = n5mu.read_voxel_grid(reference, ref_subpath)
     n5im = create_n5_dataset(output, output_subpath, ref_grid, xy_overlap, z_overlap)
     write_updated_transform(n5im, output_subpath, updated_warp, oo)
     n5im = create_n5_dataset(invoutput, output_subpath, ref_grid, xy_overlap, z_overlap)
