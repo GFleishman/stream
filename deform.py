@@ -25,6 +25,7 @@ if __name__ == '__main__':
     initial_transform   = sys.argv[7]
     final_lcc           = sys.argv[8]
     inverse             = sys.argv[9]
+    auto_mask           = sys.argv[10]
 
     vox = n5mu.read_voxel_spacing(fixed, fixed_subpath)
     offset, extent = read_coords(coords)
@@ -44,6 +45,7 @@ if __name__ == '__main__':
     gp.set_final_lcc(final_lcc)
     gp.set_compose_output_with_it()
     gp.set_inverse(inverse)
+    gp.set_auto_mask([int(x) for x in auto_mask.split(' ')])
     gp.register()
     
 

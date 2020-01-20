@@ -25,6 +25,7 @@ little_gaussian_stddev="later"
 big_gaussian_stddev="later"
 cc_radius="later"
 def_smoothing="later"
+auto_mask=0
 
 
 # DO NOT EDIT BELOW THIS LINE

@@ -142,7 +142,7 @@ overlap = 0.01
 pruned_spots = prune_blobs(sortedSpots, overlap, min_distance)[:,:-2].astype(np.int)
 context = scan(im, pruned_spots, radius)
 
-# correct offset
+# correct offset to remove radius
 if sys.argv[4] != 'coarse':
     points = [ [(p[0] - (oo - oo_rad))*vox, p[1]] for p in context ]
 else:

@@ -59,6 +59,7 @@ aff_scale=${1?}; shift
 def_scale=${1?}; shift
 xy_stride=${1?}; shift
 z_stride=${1?}; shift
+auto_mask=${1?}; shift
 
 xy_overlap=$(( $xy_stride / 8 ))
 z_overlap=$(( $z_stride / 8 ))
@@ -120,7 +121,7 @@ for tile in $( ls -d ${tiledir}/*[0-9] ); do
   $DEFORM $fixed /${channel}/${def_scale} ${affdir}/ransac_affine /${channel}/${def_scale} \
           ${tile}/coords.txt ${tile}/warp.nrrd \
           ${tile}/ransac_affine.mat ${tile}/final_lcc.nrrd \
-          ${tile}/invwarp.nrrd
+          ${tile}/invwarp.nrrd $auto_mask
 done
 
 for tile in $( ls -d ${tiledir}/*[0-9] ); do
