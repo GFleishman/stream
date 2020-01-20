@@ -45,7 +45,7 @@ if __name__ == '__main__':
     gp.set_final_lcc(final_lcc)
     gp.set_compose_output_with_it()
     gp.set_inverse(inverse)
-    gp.set_auto_mask([int(x) for x in auto_mask.split(' ')])
+    gp.set_auto_mask([int(x) for x in auto_mask.split(',')])
     gp.register()
     
 
