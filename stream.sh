@@ -125,12 +125,13 @@ for tile in $( ls -d ${tiledir}/*[0-9] ); do
 done
 
 for tile in $( ls -d ${tiledir}/*[0-9] ); do
-  submit "stitch" 'deform*' 2 \
+  tile_num=`basename $tile`
+  submit "stitch${tile_num}" 'deform*' 2 \
   $STITCH $tile $xy_overlap $z_overlap $fixed /${channel}/${def_scale} ${affdir}/ransac_affine.mat \
           ${outdir}/transform ${outdir}/invtransform /${def_scale}
 done
 
-submit "apply_transform" "stitch" 6 \
+submit "apply_transform" "stitch*" 6 \
 $APPLY_TRANSFORM $fixed /${channel}/${def_scale} $moving /${channel}/${def_scale} \
                  ${outdir}/transform ${outdir}/warped
 

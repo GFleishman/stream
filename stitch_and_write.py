@@ -226,8 +226,8 @@ if __name__ == '__main__':
         oo[0] += xy_overlap
 
     if index[2] != 0:
-        updated_warp = updated_warp[..., z_overlap:]
-        updated_invwarp = updated_invwarp[..., z_overlap:]
+        updated_warp = updated_warp[..., z_overlap:, :]
+        updated_invwarp = updated_invwarp[..., z_overlap:, :]
         oo[2] += z_overlap
 
     # write results
