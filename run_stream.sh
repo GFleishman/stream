@@ -31,5 +31,5 @@ auto_mask=0
 # DO NOT EDIT BELOW THIS LINE
 big_stream='/groups/multifish/multifish/fleishmang/stream/stream.sh'
 bash "$big_stream" "$fixed" "$moving" "$outdir" "$channel" \
-     "$aff_scale" "$def_scale" "$xy_stride" "$z_stride"
+     "$aff_scale" "$def_scale" "$xy_stride" "$z_stride" "$auto_mask"
 
