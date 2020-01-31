@@ -96,13 +96,20 @@ def read_coords(path):
 
 
 # MAIN
+
+mode          = sys.argv[1]
+img_path      = sys.argv[2]
+img_subpath   = sys.argv[3]
+outpath       = sys.argv[4]
+radius        = np.uint16(sys.argv[5])
+spotNum       = np.uint16(sys.argv[6])
+
 # get the data
 # z5py formats data (z, y, x) by default
-radius = 8
-z5im = z5py.File(sys.argv[1], use_zarr_format=False)[sys.argv[2]]
-vox = n5mu.read_voxel_spacing(sys.argv[1], sys.argv[2]).astype(np.float64)
-if sys.argv[4] != 'coarse':
-    offset, extent = read_coords(sys.argv[4])
+z5im = z5py.File(img_path, use_zarr_format=False)[img_subpath]
+vox = n5mu.read_voxel_spacing(img_path, img_subpath).astype(np.float64)
+if mode != 'coarse':
+    offset, extent = read_coords(mode)
     oo = np.round(offset/vox).astype(np.int16)
     ee = oo + np.round(extent/vox).astype(np.int16)
     oo_rad = np.maximum(0, oo-radius)
@@ -117,17 +124,16 @@ im = im.astype(np.float64)
 coord = tw_blob_dog(im, 1, 2)
 
 # throw out spots in the margins
-if sys.argv[4] != 'coarse':
+if mode != 'coarse':
     filtered = np.logical_and(coord[:, :3] >= (oo - oo_rad), coord[:, :3] < (ee - oo_rad))
     filtered = filtered[:, 0] * filtered[:, 1] * filtered[:, 2]
     coord = coord[filtered]
 
 
 sortIdx = np.argsort(coord[:, -2])[::-1]
-spotNum=2000
 
 # prune the spots
-if sys.argv[4] == 'coarse':
+if mode == 'coarse':
     sortedSpots=coord[sortIdx,:][:spotNum * 4]
     sortIdx=np.argsort(sortedSpots[:,0])
     sortedSpots=sortedSpots[sortIdx,:][::2]
@@ -143,11 +149,11 @@ pruned_spots = prune_blobs(sortedSpots, overlap, min_distance)[:,:-2].astype(np.
 context = scan(im, pruned_spots, radius)
 
 # correct offset to remove radius
-if sys.argv[4] != 'coarse':
+if mode != 'coarse':
     points = [ [(p[0] - (oo - oo_rad))*vox, p[1]] for p in context ]
 else:
     points = [ [p[0]*vox, p[1]] for p in context]
 
 # write output
-save_PKL(sys.argv[3], points)
+save_PKL(outpath, points)
 

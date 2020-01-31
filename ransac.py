@@ -31,9 +31,11 @@ def get_PKL(filename):
     return(PKL)
 
 
-cutoff = 0.65
-threshold = 2.5 # px error
-f1,f2=sys.argv[1:3]
+f1           = sys.argv[1]
+f2           = sys.argv[2]
+outpath      = sys.argv[3]
+cutoff       = np.float64(sys.argv[4])
+threshold    = np.float64(sys.argv[5])
 
 f1 = get_PKL(f1)
 f2 = get_PKL(f2)
@@ -43,10 +45,9 @@ if len(f1) <= 100 or len(f2) <= 100:
     Aff = np.eye(4)[:3]
 
 else:
-    vox = np.array([0.406, 0.406, 1.0])
-    Apos = np.array( [x[0] for x in f1] )  * vox
+    Apos = np.array( [x[0] for x in f1] )
     Acon = np.array( [x[1].flatten() for x in f1] )
-    Bpos = np.array( [x[0] for x in f2] )  * vox
+    Bpos = np.array( [x[0] for x in f2] )
     Bcon = np.array( [x[1].flatten() for x in f2] )
     
     Amean, Astd = stats(Acon)
@@ -61,9 +62,9 @@ else:
         Aff = np.eye(4)[:3]
     else:
         r, Aff, inline = cv2.estimateAffine3D(pA, pB, ransacThreshold=threshold, confidence=0.999)
-        if (np.diag(Aff) < 0.6).any() or (Aff[:, -1] > 25).any():
+        if (np.diag(Aff) < 0.6).any():
             print("Degenerate affine produced; writing identity matrix")
             Aff = np.eye(4)[:3]
 
-np.savetxt(sys.argv[3],Aff,fmt='%.6f',delimiter=' ')
+np.savetxt(outpath, Aff, fmt='%.6f', delimiter=' ')
 

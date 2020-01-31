@@ -59,7 +59,12 @@ aff_scale=${1?}; shift
 def_scale=${1?}; shift
 xy_stride=${1?}; shift
 z_stride=${1?}; shift
-auto_mask=${1?}; shift
+spots_cc_radius=${1?}; shift
+spots_spot_number=${1?}; shift
+ransac_cc_cutoff=${1?}; shift
+ransac_dist_threshold=${1?}; shift
+deform_iterations=${1?}; shift
+deform_auto_mask=${1?}; shift
 
 xy_overlap=$(( $xy_stride / 8 ))
 z_overlap=$(( $z_stride / 8 ))
@@ -74,20 +79,20 @@ submit "cut_tiles" '' 1 \
 $CUT_TILES $fixed /${channel}/${def_scale} $tiledir $xy_stride $xy_overlap $z_stride $z_overlap
 
 submit "coarse_spots" '' 1 \
-$SPOTS $fixed /${channel}/${aff_scale} ${affdir}/fixed_spots.pkl coarse
+$SPOTS coarse $fixed /${channel}/${aff_scale} ${affdir}/fixed_spots.pkl $spots_cc_radius $spots_spot_number
 
 submit "coarse_spots" '' 1 \
-$SPOTS $moving /${channel}/${aff_scale} ${affdir}/moving_spots.pkl coarse
+$SPOTS coarse $moving /${channel}/${aff_scale} ${affdir}/moving_spots.pkl $spots_cc_radius $spots_spot_number
 
 submit "coarse_ransac" "coarse_spots" 1 \
 $RANSAC ${affdir}/fixed_spots.pkl ${affdir}/moving_spots.pkl \
-        ${affdir}/ransac_affine.mat
+        ${affdir}/ransac_affine.mat $ransac_cc_cutoff $ransac_dist_threshold
 
 submit "apply_affine_small" "coarse_ransac" 1 \
 $APPLY_TRANSFORM $fixed /${channel}/${aff_scale} $moving /${channel}/${aff_scale} \
                  ${affdir}/ransac_affine.mat ${affdir}/ransac_affine
 
-submit "apply_affine_big" "coarse_ransac" 4 \
+submit "apply_affine_big" "coarse_ransac" 8 \
 $APPLY_TRANSFORM $fixed /${channel}/${def_scale} $moving /${channel}/${def_scale} \
                  ${affdir}/ransac_affine.mat ${affdir}/ransac_affine
 
@@ -103,13 +108,14 @@ for tile in $( ls -d ${tiledir}/*[0-9] ); do
   tile_num=`basename $tile`
 
   submit "spots${tile_num}" '' 1 \
-  $SPOTS $fixed /${channel}/${aff_scale} ${tile}/fixed_spots.pkl ${tile}/coords.txt
+  $SPOTS ${tile}/coords.txt $fixed /${channel}/${aff_scale} ${tile}/fixed_spots.pkl $spots_cc_radius $spots_spot_number
 
   submit "spots${tile_num}" "apply_affine_small" 1 \
-  $SPOTS ${affdir}/ransac_affine /${channel}/${aff_scale} ${tile}/moving_spots.pkl ${tile}/coords.txt
+  $SPOTS ${tile}/coords.txt ${affdir}/ransac_affine /${channel}/${aff_scale} ${tile}/moving_spots.pkl $spots_cc_radius $spots_spot_number
 
   submit "ransac${tile_num}" "spots${tile_num}" 1 \
-  $RANSAC ${tile}/fixed_spots.pkl ${tile}/moving_spots.pkl ${tile}/ransac_affine.mat
+  $RANSAC ${tile}/fixed_spots.pkl ${tile}/moving_spots.pkl ${tile}/ransac_affine.mat \
+          $ransac_cc_cutoff $ransac_dist_threshold
 done
 
 submit "interpolate_affines" 'ransac*' 1 \
@@ -121,7 +127,7 @@ for tile in $( ls -d ${tiledir}/*[0-9] ); do
   $DEFORM $fixed /${channel}/${def_scale} ${affdir}/ransac_affine /${channel}/${def_scale} \
           ${tile}/coords.txt ${tile}/warp.nrrd \
           ${tile}/ransac_affine.mat ${tile}/final_lcc.nrrd \
-          ${tile}/invwarp.nrrd $auto_mask
+          ${tile}/invwarp.nrrd $deform_iterations $deform_auto_mask
 done
 
 for tile in $( ls -d ${tiledir}/*[0-9] ); do
@@ -131,7 +137,7 @@ for tile in $( ls -d ${tiledir}/*[0-9] ); do
           ${outdir}/transform ${outdir}/invtransform /${def_scale}
 done
 
-submit "apply_transform" 'stitch*' 6 \
+submit "apply_transform" 'stitch*' 12 \
 $APPLY_TRANSFORM $fixed /${channel}/${def_scale} $moving /${channel}/${def_scale} \
                  ${outdir}/transform ${outdir}/warped
 

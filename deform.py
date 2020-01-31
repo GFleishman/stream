@@ -25,7 +25,8 @@ if __name__ == '__main__':
     initial_transform   = sys.argv[7]
     final_lcc           = sys.argv[8]
     inverse             = sys.argv[9]
-    auto_mask           = sys.argv[10]
+    iterations          = sys.argv[10]
+    auto_mask           = sys.argv[11]
 
     vox = n5mu.read_voxel_spacing(fixed, fixed_subpath)
     offset, extent = read_coords(coords)
@@ -38,7 +39,7 @@ if __name__ == '__main__':
     gp.set_fixed(fixed)
     gp.set_moving(moving)
     gp.set_output(output)
-    gp.set_iterations('500x200x25x1')
+    gp.set_iterations(iterations)
     gp.set_initial_transform(initial_transform)
     gp.set_n5_fixed_path(fixed_subpath, n5_slice)
     gp.set_n5_moving_path(moving_subpath, n5_slice)
