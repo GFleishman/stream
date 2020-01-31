@@ -131,7 +131,7 @@ for tile in $( ls -d ${tiledir}/*[0-9] ); do
           ${outdir}/transform ${outdir}/invtransform /${def_scale}
 done
 
-submit "apply_transform" "stitch*" 6 \
+submit "apply_transform" 'stitch*' 6 \
 $APPLY_TRANSFORM $fixed /${channel}/${def_scale} $moving /${channel}/${def_scale} \
                  ${outdir}/transform ${outdir}/warped
 
